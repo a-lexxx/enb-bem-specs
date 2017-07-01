@@ -1,0 +1,116 @@
+<!doctype html>
+<!--
+    Заготовка взята из обычного context.html кармы
+-->
+<html>
+
+<head>
+    <title>Karma</title>
+    <link href="favicon.ico" rel="icon" type="image/x-icon" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+</head>
+
+<body>
+    <!-- The scripts need to be at the end of body, so that some test running frameworks
+   (Angular Scenario, for example) need the body to be loaded so that it can insert its magic
+   into it. If it is before body, then it fails to find the body and crashes and burns in an epic
+   manner. -->
+    <script src="context.js"></script>
+    <!--<script src="debug.js"></script>-->
+    <script type="text/javascript">
+        // Configure our Karma
+    %CLIENT_CONFIG%
+
+    window.__karma__.setupContext(window);
+
+    // All served files with the latest timestamps
+    %MAPPINGS%
+    </script>
+    <!-- Dynamically replaced with <script> tags -->
+    %SCRIPTS%
+
+    <script type="text/javascript">
+        if (__karma__.files) {
+            const isDebugPage = /debug.html$/.test(location.pathname);
+            const debugLog = __karma__.config.logLevel !== 'DEBUG' ? () => {} :
+                (...args) => __karma__.log('DEBUG', args);
+
+            const getParams = () => location.search.split(/[?&]/).reduce((acc, item) => {
+                if (!item) return acc;
+
+                const [key, val] = item.split('=');
+                acc[key] = val;
+                return acc;
+            }, {});
+
+            const htmls = Object.keys(__karma__.files).filter(file => file.endsWith('.html'));
+
+            const params = getParams();
+            const testIdx = params.testIdx;
+            // если это дочернее окно с номером теста, то запускаем тест по номеру, подключая соответствующий html
+            if (!isNaN(testIdx)) {
+                window.addEventListener('load', () => {
+                    const html = htmls[testIdx];
+                    const link = document.createElement('link');
+
+                    debugLog(`Current html: ${html}`);
+
+                    document.title = `Karma test ${testIdx}: ${html}`;
+                    link.rel = 'import';
+                    link.href = html;
+                    link.addEventListener('load', () => {
+                        __karma__.loaded();
+                    });
+                    document.body.appendChild(link);
+                });
+            } else {
+                // иначе это основное окно тестов,
+                // тут будем запускать тесты по очереди открывая себя же с номерами тестов по очереди
+
+                let testIdx = 1;
+                let child;
+
+                document.title = `Karma main test context`;
+                !isDebugPage && window.addEventListener('unload', function() {
+                    child && child.close();
+                });
+
+                window.karma || (window.karma = {});
+
+                // передаёт вызов исходному родительскому окну
+                function proxyCall(methodName, args = []) {
+                    opener.karma[methodName].apply(opener.karma, [].slice.call(args));
+                }
+
+                // добавляем прокси-методы кармы
+                // эти методы логируем и проксируем выше
+                ['info', 'result', 'error'].forEach(methodName => {
+                    karma[methodName] = function() {
+                        methodName !== 'info' && debugLog(`${testIdx}/${htmls.length} ${methodName}:`, arguments);
+                        proxyCall(methodName, arguments);
+                    };
+                });
+
+                // завершение теста не отправляем пока все тесты не исполнятся
+                karma.complete = () => {
+                    debugLog(`${testIdx}/${htmls.length} complete`);
+                    isDebugPage || (childWindow => setTimeout(() => childWindow.close(), 300))(child);
+                    if (htmls.length > testIdx) {
+                        child = window.open(`${location.pathname}?testIdx=${testIdx++}`);
+                    } else {
+                        debugLog('Main context is completing');
+                        proxyCall('complete');
+                    }
+                };
+
+                karma.onbeforeunload = () => {};
+
+                htmls.length && (child = window.open(`${location.pathname}?testIdx=0`));
+            }
+        }
+    </script>
+
+</body>
+
+</html>
